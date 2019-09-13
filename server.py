@@ -4,7 +4,10 @@ import pathlib
 import ssl
 import websockets
 from jsonrpcserver import method, async_dispatch as dispatch
+import threading
 from jsonrpcclient.clients.websockets_client import WebSocketsClient
+from bleak import discover as bt_discover
+import json
 
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 localhost_pem = pathlib.Path(__file__).with_name(
@@ -17,13 +20,28 @@ async def discover(filters):
     print(filters)
     return None
 
+devicesList = []
+
+
+async def enviarPeriferico(ws, device, id):
+    await WebSocketsClient(ws).request("didDiscoverPeripheral",
+                                       peripheralId=id, name=device.name, rssi=device.rssi)
+
 
 async def main(websocket, path):
-    if path == "/scratch/ble":
-        response = await dispatch(await websocket.recv())
-        if response.wanted:
-            await websocket.send(str(response))
-            response = await WebSocketsClient(websocket).request("didDiscoverPeripheral", peripheralId=0x0000, name="MICROBIT DA ELIMU", rssi=-70)
+    while True:
+        if path == "/scratch/ble":
+            mensagem = await websocket.recv()
+            mensagemDict = json.loads(mensagem)
+            response = await dispatch(mensagem)
+            if response.wanted:
+                await websocket.send(str(response))
+                if mensagemDict["method"] == "discover":
+                    devices = await bt_discover(device="hci1", timeout=10.0)
+                    for d in devices:
+                        print(d)
+                        await enviarPeriferico(websocket, d, len(devicesList))
+                        devicesList.append(d)
 
 
 start_server = websockets.serve(
